@@ -1,0 +1,71 @@
+---
+- name: Dossiers de GLPI
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /srv/glpi
+    - /srv/glpi/initdb
+    - /srv/glpi/data
+    - /srv/glpi/data/db
+    - /srv/glpi/data/glpi
+
+- name: Fichiers de la pile GLPI
+  ansible.builtin.copy:
+    src: "{{ repo_dir }}/glpi/{{ item }}"
+    dest: "/srv/glpi/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - Dockerfile
+    - glpi.conf
+    - glpi.ini
+    - compose.yaml
+    - initdb/10-glpi.sql
+
+- name: Fichier .env (mot de passe généré une seule fois)
+  ansible.builtin.copy:
+    dest: /srv/glpi/.env
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    content: |
+      GLPI_VERSION={{ glpi_version }}
+      GLPI_DB_PASSWORD={{ lookup('ansible.builtin.password', '/dev/null chars=hexdigits length=32') }}
+  no_log: true
+
+- name: GLPI déjà initialisé ?
+  ansible.builtin.stat:
+    path: /srv/glpi/data/glpi/files/_cache
+  register: glpi_seed
+
+- name: Construire l'image GLPI
+  ansible.builtin.command: docker compose build glpi
+  args:
+    chdir: /srv/glpi
+  when: not glpi_seed.stat.exists
+  changed_when: true
+
+- name: Copie initiale des dossiers persistants de GLPI
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - -v
+      - /srv/glpi/data/glpi:/seed
+      - --entrypoint
+      - sh
+      - glpi-local
+      - -c
+      - mkdir -p /seed/config /seed/files /seed/marketplace && cp -a /var/www/glpi/config/. /seed/config/ && cp -a /var/www/glpi/files/. /seed/files/ && cp -a /var/www/glpi/marketplace/. /seed/marketplace/
+  when: not glpi_seed.stat.exists
+  changed_when: true
+
+- name: Pile GLPI démarrée
+  community.docker.docker_compose_v2:
+    project_src: /srv/glpi
+    state: present

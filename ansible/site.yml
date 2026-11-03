@@ -8,6 +8,14 @@
     status_host: status.julien.lab-cesi.fr
     notif_host: notif.julien.lab-cesi.fr
     docker_packages: "{{ ['docker.io', 'docker-compose-v2'] if ansible_distribution == 'Ubuntu' else ['docker.io', 'docker-compose'] }}"
+    deploy_glpi: false
+    glpi_host: glpi.julien.lab-cesi.fr
+    glpi_version: "11.0.12"
+    glpi_caddy_block: |
+
+      {{ glpi_host }} {
+          reverse_proxy glpi:80
+      }
 
   tasks:
     - name: SSH - pas de root, pas de mot de passe
@@ -107,21 +115,31 @@
         - "{{ plateforme_dir }}"
         - "{{ plateforme_dir }}/data"
 
-    - name: Config de la pile (compose et Caddyfile)
+    - name: Compose de la pile
       ansible.builtin.copy:
-        dest: "{{ plateforme_dir }}/{{ item }}"
+        dest: "{{ plateforme_dir }}/compose.yaml"
         owner: root
         group: root
         mode: "0644"
-        content: "{{ lookup('ansible.builtin.file', repo_dir ~ '/' ~ item, rstrip=False) | replace('status.julien.lab-cesi.fr', status_host) | replace('notif.julien.lab-cesi.fr', notif_host) }}"
-      loop:
-        - compose.yaml
-        - Caddyfile
+        content: "{{ lookup('ansible.builtin.file', repo_dir ~ '/compose.yaml', rstrip=False) | replace('status.julien.lab-cesi.fr', status_host) | replace('notif.julien.lab-cesi.fr', notif_host) }}"
+
+    - name: Caddyfile (noms, et bloc GLPI si activé)
+      ansible.builtin.copy:
+        dest: "{{ plateforme_dir }}/Caddyfile"
+        owner: root
+        group: root
+        mode: "0644"
+        content: "{{ lookup('ansible.builtin.file', repo_dir ~ '/Caddyfile', rstrip=False) | replace('status.julien.lab-cesi.fr', status_host) | replace('notif.julien.lab-cesi.fr', notif_host) ~ (glpi_caddy_block if deploy_glpi | bool else '') }}"
+      notify: Recharger Caddy
 
     - name: Pile docker compose démarrée
       community.docker.docker_compose_v2:
         project_src: "{{ plateforme_dir }}"
         state: present
+
+    - name: GLPI (conteneurs, derrière Caddy)
+      ansible.builtin.include_tasks: glpi.yml
+      when: deploy_glpi | bool
 
   handlers:
     - name: Recharger ssh
@@ -142,3 +160,8 @@
       ansible.builtin.service:
         name: docker
         state: restarted
+
+    - name: Recharger Caddy
+      ansible.builtin.command: docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+      args:
+        chdir: "{{ plateforme_dir }}"

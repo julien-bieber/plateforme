@@ -1,0 +1,41 @@
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: glpi
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: ${GLPI_DB_PASSWORD}
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - ./data/db:/var/lib/mysql
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interne]
+
+  glpi:
+    build:
+      context: .
+      args:
+        GLPI_VERSION: ${GLPI_VERSION}
+    image: glpi-local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data/glpi/config:/var/www/glpi/config
+      - ./data/glpi/files:/var/www/glpi/files
+      - ./data/glpi/marketplace:/var/www/glpi/marketplace
+    networks: [interne, plateforme]
+
+networks:
+  interne:
+  plateforme:
+    name: plateforme_default
+    external: true
