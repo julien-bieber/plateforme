@@ -5,8 +5,9 @@
   vars:
     plateforme_dir: /srv/plateforme
     repo_dir: "{{ playbook_dir }}/.."
-    # Utilisé seulement si Docker est absent (VM Debian vierge)
-    docker_packages: [docker.io, docker-compose]
+    status_host: status.julien.lab-cesi.fr
+    notif_host: notif.julien.lab-cesi.fr
+    docker_packages: "{{ ['docker.io', 'docker-compose-v2'] if ansible_distribution == 'Ubuntu' else ['docker.io', 'docker-compose'] }}"
 
   tasks:
     - name: SSH - pas de root, pas de mot de passe
@@ -67,6 +68,7 @@
       ansible.builtin.apt:
         name: "{{ docker_packages }}"
         state: present
+        update_cache: true
       when: docker_bin.rc != 0
 
     - name: Dossier du drop-in Docker
@@ -107,11 +109,11 @@
 
     - name: Config de la pile (compose et Caddyfile)
       ansible.builtin.copy:
-        src: "{{ repo_dir }}/{{ item }}"
         dest: "{{ plateforme_dir }}/{{ item }}"
         owner: root
         group: root
         mode: "0644"
+        content: "{{ lookup('ansible.builtin.file', repo_dir ~ '/' ~ item, rstrip=False) | replace('status.julien.lab-cesi.fr', status_host) | replace('notif.julien.lab-cesi.fr', notif_host) }}"
       loop:
         - compose.yaml
         - Caddyfile
