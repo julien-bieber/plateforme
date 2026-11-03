@@ -66,6 +66,9 @@
   changed_when: true
 
 - name: Pile GLPI démarrée
-  community.docker.docker_compose_v2:
-    project_src: /srv/glpi
-    state: present
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: /srv/glpi
+  register: glpi_up
+  when: not ansible_check_mode
+  changed_when: "glpi_up.stderr is search('(Created|Started|Recreated|Starting|Built)')"
