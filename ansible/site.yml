@@ -1,0 +1,142 @@
+---
+- name: Plateforme (SSH, pare-feu, Docker, pile)
+  hosts: serveurs
+  become: true
+  vars:
+    plateforme_dir: /srv/plateforme
+    repo_dir: "{{ playbook_dir }}/.."
+    # Utilisé seulement si Docker est absent (VM Debian vierge)
+    docker_packages: [docker.io, docker-compose]
+
+  tasks:
+    - name: SSH - pas de root, pas de mot de passe
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/10-durcissement.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          PermitRootLogin no
+          PasswordAuthentication no
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Recharger ssh
+
+    - name: nftables installé
+      ansible.builtin.apt:
+        name: nftables
+        state: present
+
+    - name: Pare-feu - tout fermé sauf 22, 80, 443
+      ansible.builtin.copy:
+        dest: /etc/nftables.conf
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/usr/sbin/nft -f
+          flush ruleset
+
+          table inet filter {
+              chain input {
+                  type filter hook input priority 0; policy drop;
+                  ct state established,related accept
+                  iif "lo" accept
+                  meta l4proto { icmp, ipv6-icmp } accept
+                  tcp dport { 22, 80, 443 } accept
+              }
+          }
+        validate: /usr/sbin/nft -c -f %s
+      notify:
+        - Recharger nftables
+        - Redémarrer Docker
+
+    - name: nftables actif au démarrage
+      ansible.builtin.service:
+        name: nftables
+        enabled: true
+        state: started
+
+    - name: Docker déjà installé ?
+      ansible.builtin.command: which docker
+      register: docker_bin
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Installer Docker si absent
+      ansible.builtin.apt:
+        name: "{{ docker_packages }}"
+        state: present
+      when: docker_bin.rc != 0
+
+    - name: Dossier du drop-in Docker
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Docker démarre après nftables
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker.service.d/10-after-nftables.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          After=nftables.service
+          Wants=nftables.service
+      notify: Recharger systemd
+
+    - name: Docker actif au démarrage
+      ansible.builtin.service:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Appliquer les redémarrages avant la pile
+      ansible.builtin.meta: flush_handlers
+
+    - name: Dossiers de la plateforme
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ plateforme_dir }}"
+        - "{{ plateforme_dir }}/data"
+
+    - name: Config de la pile (compose et Caddyfile)
+      ansible.builtin.copy:
+        src: "{{ repo_dir }}/{{ item }}"
+        dest: "{{ plateforme_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - compose.yaml
+        - Caddyfile
+
+    - name: Pile docker compose démarrée
+      community.docker.docker_compose_v2:
+        project_src: "{{ plateforme_dir }}"
+        state: present
+
+  handlers:
+    - name: Recharger ssh
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
+
+    - name: Recharger systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Recharger nftables
+      ansible.builtin.service:
+        name: nftables
+        state: reloaded
+
+    - name: Redémarrer Docker
+      ansible.builtin.service:
+        name: docker
+        state: restarted
