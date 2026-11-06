@@ -1,0 +1,6 @@
+---
+- name: Durcissement SSH sur toute la plateforme
+  hosts: plateforme
+  become: true
+  roles:
+    - ssh

@@ -1,3 +1,5 @@
 data/
 .env
 *.bak*
+.vault_pass*
+*.retry

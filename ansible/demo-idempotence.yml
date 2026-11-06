@@ -1,0 +1,20 @@
+---
+- name: Démo idempotence - shell contre lineinfile (copie dans /tmp)
+  hosts: srv-lab
+  tasks:
+    - name: Préparer une copie de test de sshd_config
+      ansible.builtin.copy:
+        src: /etc/ssh/sshd_config
+        dest: /tmp/demo_sshd_config
+        remote_src: true
+        force: false
+
+    - name: A éviter - shell ajoute la ligne à chaque passage
+      ansible.builtin.shell:
+        cmd: echo 'PermitRootLogin no' >> /tmp/demo_sshd_config
+
+    - name: A préférer - lineinfile écrit seulement si la ligne diffère
+      ansible.builtin.lineinfile:
+        path: /tmp/demo_sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: PermitRootLogin no
