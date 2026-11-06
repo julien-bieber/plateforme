@@ -1,0 +1,10 @@
+name: lint
+on: [push, pull_request]
+jobs:
+  ansible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx install ansible-lint
+      - run: ansible-lint ssh.yml roles/ssh
+        working-directory: ansible

@@ -1,0 +1,3 @@
+---
+# Mot de passe sudo de LINUX_1 (srv-lab), lu depuis le fichier chiffré vault.yml
+ansible_become_password: "{{ vault_become_password }}"
